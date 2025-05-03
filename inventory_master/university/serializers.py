@@ -5,6 +5,7 @@ from io import BytesIO
 from django.core.files.uploadedfile import InMemoryUploadedFile
 
 class UniversitySerializer(serializers.ModelSerializer):
+    
     class Meta:
         model = University
         fields = ['id', 'name', 'address', 'logo']

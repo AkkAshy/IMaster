@@ -68,9 +68,10 @@ class MovementHistory(models.Model):
     from_room = models.ForeignKey(Room, on_delete=models.SET_NULL, null=True, blank=True, related_name='moved_out', verbose_name="Из кабинета")
     to_room = models.ForeignKey(Room, on_delete=models.SET_NULL, null=True, blank=True, related_name='moved_in', verbose_name="В кабинет")
     moved_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата перемещения")
+    note = models.TextField(blank=True, null=True)
 
     def __str__(self):
-        return f"Перемещение {self.equipment.name} ({self.moved_at.date()})"
+        return f'{self.equipment} moved from {self.from_room} to {self.to_room} at {self.moved_at}'
 
     class Meta:
         verbose_name = "История перемещений"

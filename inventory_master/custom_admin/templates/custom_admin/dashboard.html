@@ -1,0 +1,106 @@
+{% extends 'custom_admin/base.html' %}
+{% block title %}Дашборд{% endblock %}
+{% block content %}
+<h1>Дашборд</h1>
+<div class="row">
+    <div class="col-md-4 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Университеты</h5>
+                <p class="card-text">Количество: {{ university_count }}</p>
+                <a href="{% url 'custom_admin:university_list' %}" class="btn btn-primary">Перейти</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Корпуса</h5>
+                <p class="card-text">Количество: {{ building_count }}</p>
+                <a href="{% url 'custom_admin:building_list' %}" class="btn btn-primary">Перейти</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Факультеты</h5>
+                <p class="card-text">Количество: {{ faculty_count }}</p>
+                <a href="{% url 'custom_admin:faculty_list' %}" class="btn btn-primary">Перейти</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Этажи</h5>
+                <p class="card-text">Количество: {{ floor_count }}</p>
+                <a href="{% url 'custom_admin:floor_list' %}" class="btn btn-primary">Перейти</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Кабинеты</h5>
+                <p class="card-text">Количество: {{ room_count }}</p>
+                <a href="{% url 'custom_admin:room_list' %}" class="btn btn-primary">Перейти</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Кафедры</h5>
+                <p class="card-text">Количество: {{ department_count }}</p>
+                <a href="{% url 'custom_admin:department_list' %}" class="btn btn-primary">Перейти</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Типы оборудования</h5>
+                <p class="card-text">Количество: {{ equipment_type_count }}</p>
+                <a href="{% url 'custom_admin:equipment_type_list' %}" class="btn btn-primary">Перейти</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Оборудование</h5>
+                <p class="card-text">Количество: {{ equipment_count }}</p>
+                <a href="{% url 'custom_admin:equipment_list' %}" class="btn btn-primary">Перейти</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Договоры</h5>
+                <p class="card-text">Количество: {{ contract_count }}</p>
+                <a href="{% url 'custom_admin:contract_document_list' %}" class="btn btn-primary">Перейти</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Пользователи</h5>
+                <p class="card-text">Количество: {{ user_count }}</p>
+                <a href="{% url 'custom_admin:user_list' %}" class="btn btn-primary">Перейти</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Перемещения</h5>
+                <p class="card-text">Количество: {{ movement_count }}</p>
+                <a href="{% url 'custom_admin:movement_list' %}" class="btn btn-primary">Перейти</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
