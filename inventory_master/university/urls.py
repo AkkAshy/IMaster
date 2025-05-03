@@ -3,8 +3,8 @@ from . import views
 
 urlpatterns = [
     # Университеты
-    path('universities/', views.UniversityListCreateView.as_view(), name='university-list-create'),
-    path('universities/<int:pk>/', views.UniversityDetailView.as_view(), name='university-detail'),
+    path('', views.UniversityListCreateView.as_view(), name='university-list-create'),
+    path('<int:pk>/', views.UniversityDetailView.as_view(), name='university-detail'),
 
     # Корпуса
     path('buildings/', views.BuildingListCreateView.as_view(), name='building-list-create'),
@@ -17,6 +17,7 @@ urlpatterns = [
     # Этажи
     path('floors/', views.FloorListCreateView.as_view(), name='floor-list-create'),
     path('floors/<int:pk>/', views.FloorDetailView.as_view(), name='floor-detail'),
+    path('buildings/<int:building_pk>/floors/', views.FloorByBuildingView.as_view()),
 
     # Кабинеты
     path('rooms/', views.RoomListCreateView.as_view(), name='room-list-create'),

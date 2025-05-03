@@ -2,3 +2,4 @@
 *.egg
 *.py[co]
 __pycache__/
+env/

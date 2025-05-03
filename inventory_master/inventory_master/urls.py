@@ -7,4 +7,5 @@ urlpatterns = [
     path('admin/', admin.site.urls),  # Админка
     path('user/', include('user.urls')),  # Указываем приложение 'users'
     path('university/', include('university.urls')),
+    path('inventory/', include('inventory.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

@@ -5,6 +5,8 @@ from .serializers import UserSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from .permissions import IsAdminUser  # Импортируем кастомный пермишн
 from rest_framework.response import Response
+from rest_framework.exceptions import PermissionDenied
+
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
@@ -13,7 +15,7 @@ class UserViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         if not self.request.user.is_admin():
-            raise PermissionError("Только администратор может создавать пользователей.")
+            raise PermissionDenied("Только администратор может создавать пользователей.")
         serializer.save()
         
     # Этот метод будет отвечать за логику аутентификации

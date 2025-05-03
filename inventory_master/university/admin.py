@@ -48,7 +48,11 @@ class RoomAdmin(admin.ModelAdmin):
 
 @admin.register(Department)
 class DepartmentAdmin(admin.ModelAdmin):
-    list_display = ('name', 'faculty')
+    list_display = ('name', 'get_floor', 'faculty')
     list_filter = ('faculty',)
     search_fields = ('name',)
     list_per_page = 20
+
+    def get_floor(self, obj):
+        return obj.faculty.building.name if obj.faculty and obj.faculty.building else "-"
+    get_floor.short_description = "Корпус"

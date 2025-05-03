@@ -120,18 +120,23 @@ class Room(models.Model): # Кабинет
         unique_together = ('floor', 'number')
 
 
-class Department(models.Model): # Кафедра
+class Department(models.Model):
     name = models.CharField(max_length=255, verbose_name="Название кафедры")
-    faculty = models.ForeignKey(Faculty, on_delete=models.CASCADE, related_name="departments", verbose_name="Факультет")
+    faculty = models.ForeignKey(
+        'Faculty',
+        on_delete=models.CASCADE,
+        related_name='departments',
+        verbose_name="Факультет"
+    )
+    description = models.TextField(blank=True, verbose_name="Описание кафедры")  # Описание кафедры
 
     def __str__(self):
         return self.name
-    
 
     class Meta:
         verbose_name = "Кафедра"
         verbose_name_plural = "Кафедры"
-        unique_together = ('faculty', 'name')
+        unique_together = ('faculty', 'name')  # Уникальность по факультету и названию кафедры
 
 
 class RoomHistory(models.Model):

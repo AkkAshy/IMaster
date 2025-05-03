@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import University, Building, Faculty, Floor, Room, Department
+from .models import University, Building, Faculty, Floor, Room, Department, RoomHistory
 import qrcode
 from io import BytesIO
 from django.core.files.uploadedfile import InMemoryUploadedFile
@@ -33,18 +33,30 @@ class FloorSerializer(serializers.ModelSerializer):
 class RoomSerializer(serializers.ModelSerializer):
     floor = serializers.PrimaryKeyRelatedField(queryset=Floor.objects.all())
     qr_code = serializers.ImageField(read_only=True)
+    qr_code_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Room
-        fields = ['id', 'number', 'name', 'is_special', 'photo', 'qr_code', 'floor']
+        fields = ['id', 'number', 'name', 'is_special', 'photo', 'qr_code', 'qr_code_url', 'floor']
+
 
     def create(self, validated_data):
-        # QR код создается автоматически через сигнал
-        room = Room.objects.create(**validated_data)
+        room = Room(**validated_data)
+        room.save()  # Здесь уже сработает метод модели save()
         return room
+    
+    def get_qr_code_url(self, obj):
+        if obj.qr_code:
+            return obj.qr_code.url
+        return None
 
 class DepartmentSerializer(serializers.ModelSerializer):
-    faculty = serializers.PrimaryKeyRelatedField(qeryset=Faculty.objects.all())
+    faculty = serializers.PrimaryKeyRelatedField(queryset=Faculty.objects.all())
     class Meta:
         model = Department
         fields = ['id', 'name', 'faculty']
+
+class RoomHistorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RoomHistory
+        fields = ['id', 'room', 'action', 'timestamp', 'description']

@@ -12,6 +12,7 @@ class User(AbstractUser):
         default=Role.MANAGER,
         verbose_name="Роль"
     )
+    username = models.CharField(max_length=150, unique=True, verbose_name="Логин")
     first_name = models.CharField(max_length=100, verbose_name="Имя")
     last_name = models.CharField(max_length=100, verbose_name="Фамилия")
     phone_number = models.CharField(max_length=20, null=True, blank=True, verbose_name="Телефонный номер")
