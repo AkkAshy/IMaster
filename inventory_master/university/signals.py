@@ -2,31 +2,36 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 from .models import Room
 from io import BytesIO
-from django.core.files.uploadedfile import InMemoryUploadedFile
 import qrcode
+from django.core.files import File
 
 @receiver(post_save, sender=Room)
 def generate_qr_code(sender, instance, created, **kwargs):
     """
-    Генерация QR-кода для кабинета после его сохранения
+    Генерация QR-кода для кабинета после создания
     """
-    if created or instance.qr_code is None:  # Генерируем QR-код только при создании нового объекта или если он отсутствует
-        qr_code_file = generate_qr_code_for_room(instance)
-        instance.qr_code = qr_code_file
-        instance.save()
+    if (created or not instance.qr_code) and instance.number and instance.floor:
+        try:
+            # Данные для QR-кода
+            qr_data = f"Room: {instance.number}"
+            if instance.name:
+                qr_data += f", {instance.name}"
+            if instance.floor:
+                qr_data += f", Floor: {instance.floor.number}"
 
-def generate_qr_code_for_room(room):
-    """
-    Функция для генерации QR-кода для кабинета
-    """
-    qr = qrcode.make(f"Room: {room.number}, {room.name}, Floor: {room.floor.number}")
+            # Генерация QR-кода
+            qr = qrcode.make(qr_data)
 
-    # Сохранение QR-кода как изображения в память
-    img_io = BytesIO()
-    qr.save(img_io, format='PNG')
-    img_io.seek(0)
+            img_io = BytesIO()
+            qr.save(img_io, format='PNG')
+            img_io.seek(0)
 
-    # Конвертация в файл для сохранения
-    qr_code_file = InMemoryUploadedFile(img_io, None, f"qr_{room.number}.png", 'image/png', img_io.tell(), None)
-    
-    return qr_code_file
+            filename = f"qr_{instance.number}.png"
+            
+            # Сохраняем файл без повторного вызова save()
+            instance.qr_code.save(filename, File(img_io), save=False)
+            instance.save(update_fields=['qr_code'])
+
+        except Exception as e:
+            # Логируем ошибки, если что-то пошло не так
+            print(f"[QR Code Error] Не удалось сгенерировать QR-код для комнаты {instance.id}: {e}")
