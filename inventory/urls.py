@@ -14,6 +14,10 @@ from .views import (
     RepairViewSet, DisposalViewSet,
 )
 
+from .static_views import FilteredEquipmentListView, EquipmentStatisticsView
+
+
+
 router = DefaultRouter()
 router.register(r'equipment-types', EquipmentTypeViewSet, basename='equipment-type')
 router.register(r'contracts', ContractDocumentViewSet, basename='contract')
@@ -51,5 +55,7 @@ urlpatterns = [
     path('', QRScanView.as_view(), name='scan-qr'),
     path('create-comp-spec/', ComputerSpecificationCreateView.as_view(), name='create-computer-spec'),
     path('from-link/', EquipmentFromLinkView.as_view(), name='equipment-from-link'),
+    path('statistics/', EquipmentStatisticsView.as_view(), name='equipment-statistics'),
+    path('equipment-filtered/', FilteredEquipmentListView.as_view(), name='equipment-filtered'),
 
 ]
