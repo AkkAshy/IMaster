@@ -1,9 +1,40 @@
 from django.db import models
 from university.models import Room
+from django.utils import timezone
 import uuid
-from django.contrib.auth.models import User
 from django.conf import settings
-import uuid
+from django.core.exceptions import ValidationError
+
+def validate_global_title_unique(value):
+    """Проверяет глобальную уникальность title во всех таблицах характеристик и спецификаций"""
+    if not value:  # Если title пустой, то проверка не нужна
+        return value
+
+    # Список всех моделей для проверки
+    models_to_check = [
+        'ComputerDetails', 'PrinterChar', 'ExtenderChar', 'RouterChar', 'TVChar',
+        'NotebookChar', 'MonoblokChar', 'ProjectorChar', 'WhiteboardChar', 'MonitorChar',
+        'ComputerSpecification', 'PrinterSpecification', 'ExtenderSpecification',
+        'RouterSpecification', 'TVSpecification', 'NotebookSpecification',
+        'MonoblokSpecification', 'ProjectorSpecification', 'WhiteboardSpecification',
+        'MonitorSpecification'
+    ]
+
+    # Получаем все модели из текущего модуля
+    import sys
+    current_module = sys.modules[__name__]
+
+    for model_name in models_to_check:
+        try:
+            model_class = getattr(current_module, model_name)
+            if hasattr(model_class.objects, 'filter') and model_class.objects.filter(title=value).exists():
+                raise ValidationError(f"Название '{value}' уже используется в системе")
+        except AttributeError:
+            continue
+
+    return value
+
+
 
 class EquipmentType(models.Model):
     name = models.CharField(max_length=100, verbose_name="Название типа оборудования")
@@ -19,7 +50,14 @@ class EquipmentType(models.Model):
 class ContractDocument(models.Model):
     number = models.CharField(max_length=100, verbose_name="Номер договора")
     file = models.FileField(upload_to='contracts/', verbose_name="Файл договора")
-    valid_until = models.DateField(verbose_name="Дата действия договора", null=True, blank=True)
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_ContractDocument'
+    )
+    signed_date = models.DateField(verbose_name="Дата заключения", null=True, blank=True)
     created_at = models.DateField(auto_now_add=True, verbose_name="Дата загрузки")
 
     def __str__(self):
@@ -29,26 +67,46 @@ class ContractDocument(models.Model):
         verbose_name = "Договор"
         verbose_name_plural = "Договора"
 
+class ContractTemplate(models.Model):
+    name = models.CharField(max_length=100, verbose_name="Начальные цифры")
 
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = "Шаблон"
+        verbose_name_plural = "Шаблоны"
+
+
+class INNTemplate(models.Model):
+    name = models.CharField(max_length=100, verbose_name="Начальные цифры")
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = "Шаблон ИНН"
+        verbose_name_plural = "Шаблоны ИНН"
 
 
 
 class Equipment(models.Model):
     STATUS_CHOICES = [
         ('NEW', 'Новое'),
-        ('WORKING', 'Требуется ремонт'),
-        ('NEEDS_REPAIR', 'На утилизацию'),
+        ('WORKING', 'Рабочее'),
+        ('NEEDS_REPAIR', 'Требуется ремонт'),
+        ('DISPOSED', 'Утилизировано'),
     ]
 
     type = models.ForeignKey('EquipmentType', on_delete=models.CASCADE, related_name='equipment', verbose_name="Тип оборудования")
     room = models.ForeignKey('university.Room', on_delete=models.SET_NULL, null=True, blank=True, related_name='equipment', verbose_name="Кабинет")
     name = models.CharField(max_length=255, verbose_name="Название оборудования")
-    photo = models.ImageField(upload_to='equipment_photos/', null=True, blank=True, verbose_name="Фото оборудования")
+    photo = models.CharField(max_length=500, blank=True, null=True, verbose_name="Фото оборудования")  # Ссылка на фото
     description = models.TextField(blank=True, verbose_name="Описание")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='NEW', verbose_name="Состояние")
     created_at = models.DateTimeField(auto_now_add=True)
     is_active = models.BooleanField(default=True)
-    inn = models.IntegerField(verbose_name="ИНН")
+    inn = models.CharField(verbose_name="ИНН")
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -69,13 +127,31 @@ class Equipment(models.Model):
 
 
     def save(self, *args, **kwargs):
-        if self.inn and not self.qr_code:
-            import qrcode
-            from io import BytesIO
-            from django.core.files import File
-            from PIL import Image, ImageDraw, ImageFont
+        import qrcode
+        from io import BytesIO
+        from django.core.files import File
+        from PIL import Image, ImageDraw, ImageFont
 
-            # Основные данные для QR
+        # Проверяем, нужно ли обновить QR-код
+        generate_qr = False
+        if not self.inn:
+            # Если inn пустой, удаляем QR-код, если он есть
+            if self.qr_code:
+                self.qr_code.delete(save=False)
+                self.qr_code = None
+        elif not self.qr_code:
+            # Если inn есть, но QR-кода нет, генерируем его
+            generate_qr = True
+        elif self.pk:  # Если объект уже существует, проверяем изменения inn
+            original = Equipment.objects.get(pk=self.pk)
+            if original.inn != self.inn:
+                # Если inn изменился, удаляем старый QR-код и генерируем новый
+                if self.qr_code:
+                    self.qr_code.delete(save=False)
+                generate_qr = True
+
+        # Генерация QR-кода, если нужно
+        if generate_qr:
             qr_data = f"UID: {self.uid}\nИНН: {self.inn}\nНазвание: {self.name}\nКабинет: {self.room.number if self.room else 'N/A'}"
             qr = qrcode.make(qr_data)
 
@@ -106,22 +182,119 @@ class Equipment(models.Model):
             filename = f"equipment_qr_{self.uid}.png"
             self.qr_code.save(filename, File(buffer), save=False)
 
+        # Логика изменения состояния и местоположения
+        if self.pk:  # Проверяем, существует ли объект (обновление)
+            original = Equipment.objects.get(pk=self.pk)
+            if original.status != self.status:
+                if self.status == 'NEEDS_REPAIR':
+                    self._original_room = original.room  # Сохраняем исходный кабинет
+                    self.room = None
+                    self.location = 'Каталог ремонта'
+                elif self.status == 'WORKING' and original.status == 'NEEDS_REPAIR':
+                    if hasattr(self, '_original_room') and self._original_room:
+                        self.room = self._original_room
+                        del self._original_room  # Очищаем временное поле
+                        self.location = self.room.number if self.room else None
+
         super().save(*args, **kwargs)
 
+    @property
+    def location(self):
+        return self.room.number if self.room else getattr(self, '_location', None)
+
+    @location.setter
+    def location(self, value):
+        if not self.room and value:
+            self._location = value
 
     class Meta:
         verbose_name = "Оборудование"
         verbose_name_plural = "Оборудование"
 
 
+
+
+# 1. GPUSpecification - шаблоны видеокарт (аналогично DiskSpecification)
+class GPUSpecification(models.Model):
+    computer_specification = models.ForeignKey('ComputerSpecification', on_delete=models.CASCADE, related_name='gpu_specifications', null=True, blank=True)
+    notebook_specification = models.ForeignKey('NotebookSpecification', on_delete=models.CASCADE, related_name='gpu_specifications', null=True, blank=True)
+    monoblok_specification = models.ForeignKey('MonoblokSpecification', on_delete=models.CASCADE, related_name='gpu_specifications', null=True, blank=True)
+
+    model = models.CharField(max_length=255, verbose_name="Модель видеокарты")
+
+
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_gpu_specifications',
+        verbose_name="Автор"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.model} "
+
+    class Meta:
+        verbose_name = "Спецификация видеокарты"
+        verbose_name_plural = "Спецификации видеокарт"
+
+
+# 2. GPU - реальные видеокарты оборудования (аналогично Disk)
+class GPU(models.Model):
+    equipment = models.ForeignKey(Equipment, on_delete=models.CASCADE, related_name='gpus', verbose_name="Оборудование")
+    model = models.CharField(max_length=255, verbose_name="Модель видеокарты")
+
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_gpus',
+        verbose_name="Автор"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.model} для {self.equipment.name}"
+
+    class Meta:
+        verbose_name = "Видеокарта"
+        verbose_name_plural = "Видеокарты"
+
+
+
+
 class ComputerDetails(models.Model):
+    title = models.CharField(
+    max_length=255,
+    blank=True,
+    validators=[validate_global_title_unique],
+    verbose_name="Название"
+)
     equipment = models.OneToOneField(Equipment, on_delete=models.CASCADE, related_name='computer_details', verbose_name="Оборудование")
     cpu = models.CharField(max_length=255, help_text="Процессор", verbose_name="Процессор")
     ram = models.CharField(max_length=255, help_text="Оперативная память", verbose_name="Оперативная память")
-    storage = models.CharField(max_length=255, help_text="Накопитель (SSD/HDD)", verbose_name="Накопитель")
     has_keyboard = models.BooleanField(default=True, help_text="Есть ли клавиатура")
     has_mouse = models.BooleanField(default=True, help_text="Есть ли мышь")
-    monitor_size = models.CharField(max_length=50, blank=True, help_text="Размер монитора (если есть)", verbose_name="Размер монитора")
+
+    specification = models.ForeignKey(
+        'ComputerSpecification',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_computer_details',
+        verbose_name="Исходная спецификация"
+    )
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_computer_details_author',
+        verbose_name="Автор"
+    )
 
     def __str__(self):
         return f"Компьютерные характеристики для {self.equipment.name}"
@@ -132,12 +305,17 @@ class ComputerDetails(models.Model):
 
 
 class ComputerSpecification(models.Model):
+    title = models.CharField(
+    max_length=255,
+    blank=True,
+    validators=[validate_global_title_unique],
+    verbose_name="Название"
+)
     cpu = models.CharField(max_length=255, verbose_name="Процессор")
     ram = models.CharField(max_length=255, verbose_name="Оперативная память")
-    storage = models.CharField(max_length=255, verbose_name="Накопитель (SSD/HDD)")
+    disks = models.ManyToManyField('DiskSpecification', verbose_name="Накопители", blank=True)
     has_keyboard = models.BooleanField(default=True, verbose_name="Есть ли клавиатура")
     has_mouse = models.BooleanField(default=True, verbose_name="Есть ли мышь")
-    monitor_size = models.CharField(max_length=50, blank=True, verbose_name="Размер монитора")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, verbose_name="Уникальный ID")
     author = models.ForeignKey(
@@ -151,12 +329,66 @@ class ComputerSpecification(models.Model):
 
 
     def __str__(self):
-        return f"{self.cpu}, {self.ram}, {self.storage}"
+        return f"{self.cpu}, {self.ram}"
 
     class Meta:
         verbose_name = "Компьютерная спецификация"
         verbose_name_plural = "Компьютерные спецификации"
-        unique_together = [['cpu', 'ram', 'storage']]  # Уникальность комбинаций
+
+
+class DiskSpecification(models.Model):
+    computer_specification = models.ForeignKey('ComputerSpecification', on_delete=models.CASCADE, related_name='disk_specifications', null=True, blank=True)
+    notebook_specification = models.ForeignKey('NotebookSpecification', on_delete=models.CASCADE, related_name='disk_specifications', null=True, blank=True)
+    monoblok_specification = models.ForeignKey('MonoblokSpecification', on_delete=models.CASCADE, related_name='disk_specifications', null=True, blank=True)
+    DISK_TYPE_CHOICES = (
+        ("HDD", "HDD"),
+        ("NVMEM2SSD", "NVMe M2 SSD"),
+        ("SATASSD", "SATA SSD"),
+    )
+    disk_type = models.CharField(max_length=10, choices=DISK_TYPE_CHOICES, verbose_name="Тип диска")
+    capacity_gb = models.PositiveIntegerField(verbose_name="Объем (ГБ)")
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_disk_specifications',
+        verbose_name="Автор"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.get_disk_type_display()} {self.capacity_gb} ГБ"
+
+    class Meta:
+        verbose_name = "Спецификация диска"
+        verbose_name_plural = "Спецификации дисков"
+
+
+class Disk(models.Model):
+    equipment = models.ForeignKey(Equipment, on_delete=models.CASCADE, related_name='disks', verbose_name="Оборудование")
+    disk_type = models.CharField(
+        max_length=10,
+        choices=DiskSpecification.DISK_TYPE_CHOICES,
+        verbose_name="Тип диска"
+    )
+    capacity_gb = models.PositiveIntegerField(verbose_name="Объем (ГБ)")
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_disks',
+        verbose_name="Автор"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Диск {self.get_disk_type_display()} {self.capacity_gb} ГБ для {self.equipment.name}"
+
+    class Meta:
+        verbose_name = "Диск"
+        verbose_name_plural = "Диски"
 
 
 class MovementHistory(models.Model):
@@ -173,13 +405,26 @@ class MovementHistory(models.Model):
         verbose_name = "История перемещений"
         verbose_name_plural = "История перемещений"
 
-
 class PrinterChar(models.Model):
+    title = models.CharField(
+    max_length=255,
+    blank=True,
+    validators=[validate_global_title_unique],
+    verbose_name="Название"
+)
     equipment = models.OneToOneField(Equipment, on_delete=models.CASCADE, related_name='printer_char', verbose_name="Оборудование")
     model = models.CharField(max_length=255, verbose_name="Модель принтера")
     serial_number = models.CharField(max_length=255, verbose_name="Серийный номер")
     color = models.BooleanField(default=False, verbose_name="Цветной")
     duplex = models.BooleanField(default=False, verbose_name="Дуплексный")
+    specification = models.ForeignKey(
+        'PrinterSpecification',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_printer_details',
+        verbose_name="Исходная спецификация"
+    )
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -198,10 +443,25 @@ class PrinterChar(models.Model):
         verbose_name = "Принтер Char"
         verbose_name_plural = "Принтеры Char"
 
+
 class ExtenderChar(models.Model):
+    title = models.CharField(
+    max_length=255,
+    blank=True,
+    validators=[validate_global_title_unique],
+    verbose_name="Название"
+)
     equipment = models.OneToOneField(Equipment, on_delete=models.CASCADE, related_name='extender_char', verbose_name="Оборудование")
     ports = models.IntegerField(default=4, verbose_name="Количество портов")
     length = models.CharField(max_length=50, verbose_name="Длина кабеля")
+    specification = models.ForeignKey(
+        'ExtenderSpecification',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_extender_details',
+        verbose_name="Исходная спецификация"
+    )
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -220,12 +480,27 @@ class ExtenderChar(models.Model):
         verbose_name = "Расширитель Char"
         verbose_name_plural = "Расширители Char"
 
+
 class RouterChar(models.Model):
+    title = models.CharField(
+    max_length=255,
+    blank=True,
+    validators=[validate_global_title_unique],
+    verbose_name="Название"
+)
     equipment = models.OneToOneField(Equipment, on_delete=models.CASCADE, related_name='router_char', verbose_name="Оборудование")
     model = models.CharField(max_length=255, verbose_name="Модель роутера")
     serial_number = models.CharField(max_length=255, verbose_name="Серийный номер")
     ports = models.IntegerField(default=4, verbose_name="Количество портов")
     wifi_standart = models.CharField(max_length=50, verbose_name="Стандарт Wi-Fi")
+    specification = models.ForeignKey(
+        'RouterSpecification',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_router_details',
+        verbose_name="Исходная спецификация"
+    )
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -246,10 +521,24 @@ class RouterChar(models.Model):
 
 
 class TVChar(models.Model):
+    title = models.CharField(
+    max_length=255,
+    blank=True,
+    validators=[validate_global_title_unique],
+    verbose_name="Название"
+)
     equipment = models.OneToOneField(Equipment, on_delete=models.CASCADE, related_name='tv_char', verbose_name="Оборудование")
     model = models.CharField(max_length=255, verbose_name="Модель телевизора")
     serial_number = models.CharField(max_length=255, verbose_name="Серийный номер")
     screen_size = models.CharField(max_length=50, verbose_name="Размер экрана")
+    specification = models.ForeignKey(
+        'TVSpecification',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_tv_details',
+        verbose_name="Исходная спецификация"
+    )
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -270,6 +559,12 @@ class TVChar(models.Model):
 
 
 class PrinterSpecification(models.Model):
+    title = models.CharField(
+    max_length=255,
+    blank=True,
+    validators=[validate_global_title_unique],
+    verbose_name="Название"
+)
     model = models.CharField(max_length=255, verbose_name="Модель принтера")
     serial_number = models.CharField(max_length=255, verbose_name="Серийный номер")
     color = models.BooleanField(default=False, verbose_name="Цветной")
@@ -293,6 +588,12 @@ class PrinterSpecification(models.Model):
         verbose_name_plural = "Спецификации принтеров"
 
 class ExtenderSpecification(models.Model):
+    title = models.CharField(
+    max_length=255,
+    blank=True,
+    validators=[validate_global_title_unique],
+    verbose_name="Название"
+)
     ports = models.IntegerField(default=4, verbose_name="Количество портов")
     length = models.CharField(max_length=50, verbose_name="Длина кабеля")
     author = models.ForeignKey(
@@ -314,6 +615,12 @@ class ExtenderSpecification(models.Model):
         verbose_name_plural = "Расширители Спецификасии"
 
 class RouterSpecification(models.Model):
+    title = models.CharField(
+    max_length=255,
+    blank=True,
+    validators=[validate_global_title_unique],
+    verbose_name="Название"
+)
     model = models.CharField(max_length=255, verbose_name="Модель роутера")
     serial_number = models.CharField(max_length=255, verbose_name="Серийный номер")
     ports = models.IntegerField(default=4, verbose_name="Количество портов")
@@ -337,6 +644,12 @@ class RouterSpecification(models.Model):
         verbose_name_plural = "Роутеры Спецификасии"
 
 class TVSpecification(models.Model):
+    title = models.CharField(
+    max_length=255,
+    blank=True,
+    validators=[validate_global_title_unique],
+    verbose_name="Название"
+)
     model = models.CharField(max_length=255, verbose_name="Модель телевизора")
     serial_number = models.CharField(max_length=255, verbose_name="Серийный номер")
     screen_size = models.CharField(max_length=50, verbose_name="Размер экрана")
@@ -361,11 +674,24 @@ class TVSpecification(models.Model):
 
 ##############################################
 class NotebookChar(models.Model):
+    title = models.CharField(
+    max_length=255,
+    blank=True,
+    validators=[validate_global_title_unique],
+    verbose_name="Название"
+)
     equipment = models.OneToOneField(Equipment, on_delete=models.CASCADE, related_name='notebook_details', verbose_name="Ноутбук")
     cpu = models.CharField(max_length=255, help_text="Процессор", verbose_name="Процессор")
     ram = models.CharField(max_length=255, help_text="Оперативная память", verbose_name="Оперативная память")
-    storage = models.CharField(max_length=255, help_text="Накопитель (SSD/HDD)", verbose_name="Накопитель")
     monitor_size = models.CharField(max_length=50, blank=True, help_text="Размер монитора", verbose_name="Размер монитора")
+    specification = models.ForeignKey(
+        'NotebookSpecification',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_notebook_details',
+        verbose_name="Исходная спецификация"
+    )
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -373,10 +699,9 @@ class NotebookChar(models.Model):
         blank=True,
         related_name='createdchar_notebook',
         verbose_name="Автор"
-
     )
-    created_at = models.DateTimeField(auto_now_add=True)
-
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Создано")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Обновлено")
 
     def __str__(self):
         return f"Характеристики ноутбука для {self.equipment.name}"
@@ -386,10 +711,17 @@ class NotebookChar(models.Model):
         verbose_name_plural = "Характеристики Ноутбуков"
 
 
+
 class NotebookSpecification(models.Model):
+    title = models.CharField(
+    max_length=255,
+    blank=True,
+    validators=[validate_global_title_unique],
+    verbose_name="Название"
+)
     cpu = models.CharField(max_length=255, help_text="Процессор", verbose_name="Процессор")
     ram = models.CharField(max_length=255, help_text="Оперативная память", verbose_name="Оперативная память")
-    storage = models.CharField(max_length=255, help_text="Накопитель (SSD/HDD)", verbose_name="Накопитель")
+    disks = models.ManyToManyField('DiskSpecification', verbose_name="Накопители", blank=True)
     monitor_size = models.CharField(max_length=50, blank=True, help_text="Размер монитора", verbose_name="Размер монитора")
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -402,7 +734,7 @@ class NotebookSpecification(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.cpu}, {self.ram}, {self.storage}"
+        return f"{self.cpu}, {self.ram}"
 
     class Meta:
         verbose_name = "Характеристики Ноутбука"
@@ -410,13 +742,26 @@ class NotebookSpecification(models.Model):
 
 
 class MonoblokChar(models.Model):
+    title = models.CharField(
+    max_length=255,
+    blank=True,
+    validators=[validate_global_title_unique],
+    verbose_name="Название"
+)
     equipment = models.OneToOneField(Equipment, on_delete=models.CASCADE, related_name='monoblok_details', verbose_name="Моноблок")
     cpu = models.CharField(max_length=255, help_text="Процессор", verbose_name="Процессор")
     ram = models.CharField(max_length=255, help_text="Оперативная память", verbose_name="Оперативная память")
-    storage = models.CharField(max_length=255, help_text="Накопитель (SSD/HDD)", verbose_name="Накопитель")
-    has_keyboard = models.BooleanField(default=True, help_text="Есть ли клавиатура")
-    has_mouse = models.BooleanField(default=True, help_text="Есть ли мышь")
+    has_keyboard = models.BooleanField(default=True, help_text="Есть ли клавиатура", verbose_name="Есть клавиатура")
+    has_mouse = models.BooleanField(default=True, help_text="Есть ли мышь", verbose_name="Есть мышь")
     monitor_size = models.CharField(max_length=50, blank=True, help_text="Размер монитора (если есть)", verbose_name="Размер монитора")
+    specification = models.ForeignKey(
+        'MonoblokSpecification',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_monoblok_details',
+        verbose_name="Исходная спецификация"
+    )
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -425,6 +770,8 @@ class MonoblokChar(models.Model):
         related_name='createChar_monoblok',
         verbose_name="Автор"
     )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Создано")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Обновлено")
 
     def __str__(self):
         return f"Характеристики для Моноблока {self.equipment.name}"
@@ -434,9 +781,15 @@ class MonoblokChar(models.Model):
         verbose_name_plural = "Характеристика для Моноблоков"
 
 class MonoblokSpecification(models.Model):
+    title = models.CharField(
+    max_length=255,
+    blank=True,
+    validators=[validate_global_title_unique],
+    verbose_name="Название"
+)
     cpu = models.CharField(max_length=255, help_text="Процессор", verbose_name="Процессор")
     ram = models.CharField(max_length=255, help_text="Оперативная память", verbose_name="Оперативная память")
-    storage = models.CharField(max_length=255, help_text="Накопитель (SSD/HDD)", verbose_name="Накопитель")
+    disks = models.ManyToManyField('DiskSpecification', verbose_name="Накопители", blank=True)
     has_keyboard = models.BooleanField(default=True, help_text="Есть ли клавиатура")
     has_mouse = models.BooleanField(default=True, help_text="Есть ли мышь")
     monitor_size = models.CharField(max_length=50, blank=True, help_text="Размер монитора (если есть)", verbose_name="Размер монитора")
@@ -451,7 +804,7 @@ class MonoblokSpecification(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Создано")
 
     def __str__(self):
-        return f"{self.cpu}, {self.ram}, {self.storage}"
+        return f"{self.cpu}, {self.ram}"
 
     class Meta:
         verbose_name = "Характеристика для Моноблока"
@@ -459,6 +812,12 @@ class MonoblokSpecification(models.Model):
 
 
 class ProjectorChar(models.Model):
+    title = models.CharField(
+    max_length=255,
+    blank=True,
+    validators=[validate_global_title_unique],
+    verbose_name="Название"
+)
     equipment = models.OneToOneField(Equipment, on_delete=models.CASCADE, related_name='projector_char', verbose_name="Оборудование")
     model = models.CharField(max_length=255, verbose_name="Модель")
     lumens = models.PositiveIntegerField(verbose_name="Яркость (люмены)")
@@ -472,6 +831,14 @@ class ProjectorChar(models.Model):
         ),
         verbose_name="Тип проекции"
     )
+    specification = models.ForeignKey(
+        'ProjectorSpecification',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_projector_details',
+        verbose_name="Исходная спецификация"
+    )
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -480,8 +847,8 @@ class ProjectorChar(models.Model):
         related_name='createdchar_projector',
         verbose_name="Автор"
     )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Создано")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Обновлено")
 
     class Meta:
         verbose_name = "Характеристики проектора"
@@ -491,6 +858,12 @@ class ProjectorChar(models.Model):
         return f"Характеристики {self.model} для {self.equipment}"
 
 class ProjectorSpecification(models.Model):
+    title = models.CharField(
+    max_length=255,
+    blank=True,
+    validators=[validate_global_title_unique],
+    verbose_name="Название"
+)
     model = models.CharField(max_length=255, verbose_name="Модель")
     lumens = models.PositiveIntegerField(verbose_name="Яркость (люмены)")
     resolution = models.CharField(max_length=50, verbose_name="Разрешение", help_text="Например, 1920x1080")
@@ -521,8 +894,15 @@ class ProjectorSpecification(models.Model):
     def __str__(self):
         return f"Шаблон {self.model}"
 
+
 # Новые модели для электронной доски
 class WhiteboardChar(models.Model):
+    title = models.CharField(
+    max_length=255,
+    blank=True,
+    validators=[validate_global_title_unique],
+    verbose_name="Название"
+)
     equipment = models.OneToOneField(Equipment, on_delete=models.CASCADE, related_name='whiteboard_char', verbose_name="Оборудование")
     model = models.CharField(max_length=255, verbose_name="Модель")
     screen_size = models.PositiveIntegerField(verbose_name="Размер экрана (дюймы)")
@@ -534,6 +914,14 @@ class WhiteboardChar(models.Model):
         ),
         verbose_name="Тип сенсора"
     )
+    specification = models.ForeignKey(
+        'WhiteboardSpecification',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_whiteboard_details',
+        verbose_name="Исходная спецификация"
+    )
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -542,8 +930,8 @@ class WhiteboardChar(models.Model):
         related_name='createdchar_whiteboard',
         verbose_name="Автор"
     )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Создано")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Обновлено")
 
     class Meta:
         verbose_name = "Характеристики электронной доски"
@@ -552,7 +940,14 @@ class WhiteboardChar(models.Model):
     def __str__(self):
         return f"Характеристики {self.model} для {self.equipment}"
 
+
 class WhiteboardSpecification(models.Model):
+    title = models.CharField(
+    max_length=255,
+    blank=True,
+    validators=[validate_global_title_unique],
+    verbose_name="Название"
+)
     model = models.CharField(max_length=255, verbose_name="Модель")
     screen_size = models.PositiveIntegerField(verbose_name="Размер экрана (дюймы)")
     touch_type = models.CharField(
@@ -580,3 +975,220 @@ class WhiteboardSpecification(models.Model):
 
     def __str__(self):
         return f"Шаблон {self.model}"
+
+
+class Repair(models.Model):
+    """
+    Модель для записей о ремонте оборудования.
+    """
+    equipment = models.OneToOneField(Equipment, on_delete=models.CASCADE, related_name='repair_record')
+    start_date = models.DateTimeField(auto_now_add=True, verbose_name="Дата начала ремонта")
+    end_date = models.DateTimeField(null=True, blank=True, verbose_name="Дата завершения")
+    status = models.CharField(
+        max_length=20,
+        choices=[
+            ('IN_PROGRESS', 'В процессе'),
+            ('COMPLETED', 'Завершён'),
+            ('FAILED', 'Неудача'),
+        ],
+        default='IN_PROGRESS',
+        verbose_name="Статус ремонта"
+    )
+    notes = models.TextField(blank=True, verbose_name="Примечания")
+
+    # Дополнительные поля для отслеживания исходного местоположения
+    original_room = models.ForeignKey(
+        'university.Room',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='equipment_in_repair',
+        verbose_name="Исходный кабинет"
+    )
+
+    def save(self, *args, **kwargs):
+        """
+        Переопределенный метод save для обработки логики ремонта.
+        """
+        # Если запись новая, сохраняем исходный кабинет
+        if not self.pk:
+            self.original_room = self.equipment.room
+
+            # Удаляем оборудование из кабинета при отправке на ремонт
+            if self.equipment.room:
+                self.equipment.room = None
+                self.equipment.status = 'NEEDS_REPAIR'
+                self.equipment.save(update_fields=['room', 'status'])
+
+        # Если запись существует и статус изменился
+        elif self.pk:
+            try:
+                old_repair = Repair.objects.get(pk=self.pk)
+
+                # Если статус изменился с "В процессе" на "Завершён"
+                if old_repair.status == 'IN_PROGRESS' and self.status == 'COMPLETED':
+                    # Обновляем дату завершения ремонта
+                    self.end_date = timezone.now()
+
+                    # Возвращаем оборудование в исходный кабинет
+                    self.equipment.room = self.original_room
+                    self.equipment.status = 'WORKING'
+                    self.equipment.save(update_fields=['room', 'status'])
+
+                # Если статус изменился с "В процессе" на "Неудача"
+                elif old_repair.status == 'IN_PROGRESS' and self.status == 'FAILED':
+                    # Обновляем дату завершения ремонта
+                    self.end_date = timezone.now()
+
+                    # Меняем статус оборудования на "Утилизировано"
+                    self.equipment.status = 'DISPOSED'
+                    self.equipment.save(update_fields=['status'])
+
+                    # Создаем запись об утилизации, если ее еще нет
+                    if not hasattr(self.equipment, 'disposal_record'):
+                        Disposal.objects.create(
+                            equipment=self.equipment,
+                            reason="Неудачный ремонт оборудования",
+                            notes=f"Автоматически создано после неудачного ремонта."
+                        )
+
+            except Repair.DoesNotExist:
+                pass
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Ремонт {self.equipment.name}"
+
+    class Meta:
+        verbose_name = "Ремонт"
+        verbose_name_plural = "Ремонты"
+
+
+class Disposal(models.Model):
+    """
+    Модель для записей об утилизации оборудования.
+    """
+    equipment = models.OneToOneField(Equipment, on_delete=models.CASCADE, related_name='disposal_record')
+    disposal_date = models.DateTimeField(auto_now_add=True, verbose_name="Дата утилизации")
+    reason = models.TextField(verbose_name="Причина утилизации")
+    notes = models.TextField(blank=True, verbose_name="Примечания")
+
+    # Дополнительные поля для отслеживания исходного местоположения
+    original_room = models.ForeignKey(
+        'university.Room',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='equipment_disposed',
+        verbose_name="Последний кабинет"
+    )
+
+    def save(self, *args, **kwargs):
+        """
+        Переопределенный метод save для обработки логики утилизации.
+        """
+        # Если запись новая, сохраняем исходный кабинет и обновляем статус
+        if not self.pk:
+            self.original_room = self.equipment.room
+
+            # Удаляем оборудование из кабинета и меняем статус
+            if self.equipment.status != 'DISPOSED':
+                self.equipment.room = None
+                self.equipment.status = 'DISPOSED'
+                self.equipment.save(update_fields=['room', 'status'])
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Утилизация {self.equipment.name}"
+
+    class Meta:
+        verbose_name = "Утилизация"
+        verbose_name_plural = "Утилизации"
+
+
+
+class MonitorChar(models.Model):
+    title = models.CharField(
+    max_length=255,
+    blank=True,
+    validators=[validate_global_title_unique],
+    verbose_name="Название"
+)
+    equipment = models.OneToOneField(Equipment, on_delete=models.CASCADE, related_name='monitor_char', verbose_name="Оборудование")
+    model = models.CharField(max_length=255, verbose_name="Модель монитора")
+    serial_number = models.CharField(max_length=255, verbose_name="Серийный номер")
+    screen_size = models.CharField(max_length=50, verbose_name="Размер экрана")
+    resolution = models.CharField(max_length=50, verbose_name="Разрешение", help_text="Например, 1920x1080")
+    panel_type = models.CharField(
+        max_length=20,
+        choices=[
+            ('IPS', 'IPS'),
+            ('TN', 'TN'),
+            ('VA', 'VA'),
+            ('OLED', 'OLED'),
+        ],
+        verbose_name="Тип матрицы",
+        blank=True
+    )
+    refresh_rate = models.PositiveIntegerField(verbose_name="Частота обновления (Гц)", null=True, blank=True)
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_monitor',
+        verbose_name="Автор"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Создано")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Обновлено")
+
+    def __str__(self):
+        return f"Монитор {self.model} ({self.serial_number})"
+
+    class Meta:
+        verbose_name = "Монитор Char"
+        verbose_name_plural = "Мониторы Char"
+
+
+class MonitorSpecification(models.Model):
+    title = models.CharField(
+    max_length=255,
+    blank=True,
+    validators=[validate_global_title_unique],
+    verbose_name="Название"
+)
+    model = models.CharField(max_length=255, verbose_name="Модель монитора")
+    serial_number = models.CharField(max_length=255, verbose_name="Серийный номер")
+    screen_size = models.CharField(max_length=50, verbose_name="Размер экрана")
+    resolution = models.CharField(max_length=50, verbose_name="Разрешение", help_text="Например, 1920x1080")
+    panel_type = models.CharField(
+        max_length=20,
+        choices=[
+            ('IPS', 'IPS'),
+            ('TN', 'TN'),
+            ('VA', 'VA'),
+            ('OLED', 'OLED'),
+        ],
+        verbose_name="Тип матрицы",
+        blank=True
+    )
+    refresh_rate = models.PositiveIntegerField(verbose_name="Частота обновления (Гц)", null=True, blank=True)
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='createdspek_monitor',
+        verbose_name="Автор"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Создано")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Обновлено")
+
+    def __str__(self):
+        return f"Спецификация монитора {self.model} ({self.serial_number})"
+
+    class Meta:
+        verbose_name = "Спецификация монитора"
+        verbose_name_plural = "Спецификации мониторов"

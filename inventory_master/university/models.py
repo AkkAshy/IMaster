@@ -4,6 +4,7 @@ import qrcode
 import os
 from io import BytesIO
 import uuid
+from django.conf import settings
 
 class University(models.Model):  # Университет
     name = models.CharField(max_length=255, verbose_name="Название университета")
@@ -38,20 +39,99 @@ class Building(models.Model):   # Корпус
         verbose_name = "Корпус"
         verbose_name_plural = "Корпуса"
 
-class Room(models.Model): # Кабинет
+# class Room(models.Model): # Кабинет
+#     building = models.ForeignKey(
+#         'Building',
+#         on_delete=models.CASCADE,
+#         related_name='rooms',
+#         verbose_name="Корпус"
+#     )
+#     floor = models.ForeignKey(
+#         'Floor',
+#         on_delete=models.CASCADE,
+#         related_name='rooms',
+#         verbose_name="Этаж"
+#     )
+
+#     derived_from = models.ForeignKey(
+#         'self',
+#         on_delete=models.SET_NULL,
+#         null=True,
+#         blank=True,
+#         related_name='derived_rooms',
+#         verbose_name="Создан из кабинета"
+#     )
+
+#     author = models.ForeignKey(
+#         settings.AUTH_USER_MODEL,
+#         on_delete=models.SET_NULL,
+#         null=True,
+#         blank=True,
+#         related_name='created_rooms',
+#         verbose_name="Автор"
+#     )
+
+#     number = models.CharField(max_length=20, verbose_name="Номер кабинета")
+#     name = models.CharField(max_length=255, blank=True, verbose_name="Название (если есть)")
+#     is_special = models.BooleanField(default=False, verbose_name="Специальный кабинет")
+#     photo = models.ImageField(upload_to='room_photos/', null=True, blank=True, verbose_name="Фото кабинета")
+#     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, verbose_name="Уникальный ID")
+#     qr_code = models.ImageField(upload_to='room_qrcodes/', null=True, blank=True, verbose_name="QR-код кабинета")
+
+
+#     class Meta:
+#         verbose_name = "Кабинет"
+#         verbose_name_plural = "Кабинеты"
+#         unique_together = ('floor', 'number')
+
+
+#     def __str__(self):
+#         return f"{self.number} ({self.building.name})"
+
+#     def generate_qr_code(self):
+#         if not self.qr_code:
+#             qr = qrcode.QRCode(version=1, box_size=10, border=5)
+#             qr.add_data(str(self.uid))
+#             qr.make(fit=True)
+#             img = qr.make_image(fill='black', back_color='white')
+
+#             buffer = BytesIO()
+#             img.save(buffer, format='PNG')
+#             file_name = f"room_qr_{self.uid}.png"
+#             self.qr_code.save(file_name, File(buffer), save=False)
+
+#     def save(self, *args, **kwargs):
+#         if not self.building:
+#             raise ValueError("Поле 'building' обязательно для заполнения")
+#         if not self.floor:
+#             raise ValueError("Поле 'floor' обязательно для заполнения")
+#         if not self.uid:
+#             self.uid = uuid.uuid4()
+#         self.generate_qr_code()
+#         super().save(*args, **kwargs)
+class RoomManager(models.Manager):
+    def get_queryset(self):
+        # Исключаем склад из стандартных запросов
+        return super().get_queryset().exclude(is_warehouse=True)
+
+
+class Room(models.Model):
     building = models.ForeignKey(
         'Building',
         on_delete=models.CASCADE,
         related_name='rooms',
-        verbose_name="Корпус"
+        verbose_name="Корпус",
+        null=True,
+        blank=True
     )
     floor = models.ForeignKey(
         'Floor',
         on_delete=models.CASCADE,
         related_name='rooms',
-        verbose_name="Этаж"
+        verbose_name="Этаж",
+        null=True,
+        blank=True
     )
-
     derived_from = models.ForeignKey(
         'self',
         on_delete=models.SET_NULL,
@@ -60,23 +140,34 @@ class Room(models.Model): # Кабинет
         related_name='derived_rooms',
         verbose_name="Создан из кабинета"
     )
-
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_rooms',
+        verbose_name="Автор"
+    )
     number = models.CharField(max_length=20, verbose_name="Номер кабинета")
     name = models.CharField(max_length=255, blank=True, verbose_name="Название (если есть)")
     is_special = models.BooleanField(default=False, verbose_name="Специальный кабинет")
+    is_warehouse = models.BooleanField(default=False, verbose_name="Склад")
     photo = models.ImageField(upload_to='room_photos/', null=True, blank=True, verbose_name="Фото кабинета")
     uid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, verbose_name="Уникальный ID")
     qr_code = models.ImageField(upload_to='room_qrcodes/', null=True, blank=True, verbose_name="QR-код кабинета")
 
+    objects = RoomManager()
+    all_objects = models.Manager()  # Для доступа к складу, если нужно
 
     class Meta:
         verbose_name = "Кабинет"
         verbose_name_plural = "Кабинеты"
         unique_together = ('floor', 'number')
 
-
     def __str__(self):
-        return f"{self.number} ({self.building.name})"
+        if self.is_warehouse:
+            return f"Склад {self.number} ({self.name or 'Без названия'})"
+        return f"{self.number} ({self.building.name if self.building else 'Без корпуса'})"
 
     def generate_qr_code(self):
         if not self.qr_code:
@@ -84,23 +175,37 @@ class Room(models.Model): # Кабинет
             qr.add_data(str(self.uid))
             qr.make(fit=True)
             img = qr.make_image(fill='black', back_color='white')
-
             buffer = BytesIO()
             img.save(buffer, format='PNG')
             file_name = f"room_qr_{self.uid}.png"
             self.qr_code.save(file_name, File(buffer), save=False)
 
     def save(self, *args, **kwargs):
-        if not self.building:
-            raise ValueError("Поле 'building' обязательно для заполнения")
-        if not self.floor:
-            raise ValueError("Поле 'floor' обязательно для заполнения")
+        # Проверяем, что склад только один
+        if self.is_warehouse:
+            existing_warehouse = Room.all_objects.filter(is_warehouse=True).exclude(pk=self.pk).exists()
+            if existing_warehouse:
+                raise ValueError("Склад уже существует. Нельзя создать больше одного склада.")
+        # Для не-складов проверяем building и floor
+        if not self.is_warehouse:
+            if not self.building:
+                raise ValueError("Поле 'building' обязательно для заполнения, если это не склад")
+            if not self.floor:
+                raise ValueError("Поле 'floor' обязательно для заполнения, если это не склад")
+        # Защищаем существующий склад от изменений
+        if self.pk:  # Если объект уже существует
+            original = Room.all_objects.get(pk=self.pk)
+            if original.is_warehouse:
+                raise ValueError("Склад нельзя изменять.")
         if not self.uid:
             self.uid = uuid.uuid4()
         self.generate_qr_code()
         super().save(*args, **kwargs)
 
-
+    def delete(self, *args, **kwargs):
+        if self.is_warehouse:
+            raise ValueError("Склад нельзя удалить.")
+        super().delete(*args, **kwargs)
 
 class Faculty(models.Model):    # Факультет
     building = models.ForeignKey(

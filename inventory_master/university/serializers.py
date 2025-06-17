@@ -453,6 +453,7 @@ class RoomSerializer(serializers.ModelSerializer):
             'building',
             'derived_from',
             'derived_from_display',
+            'author',
         ]
         read_only_fields = ['qr_code', 'qr_code_url', 'equipments']
 
@@ -475,6 +476,10 @@ class RoomSerializer(serializers.ModelSerializer):
             data['building'] = instance.floor.building.id
         return data
 
+class WarehouseSerializer(RoomSerializer):
+    class Meta:
+        model = Room
+        fields = ['uid', 'number', 'name', 'is_warehouse', 'is_special', 'photo', 'qr_code', 'equipment']
 
 
 class RoomHistorySerializer(serializers.ModelSerializer):

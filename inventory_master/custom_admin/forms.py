@@ -90,7 +90,7 @@ class EquipmentForm(forms.ModelForm):
 class ContractDocumentForm(forms.ModelForm):
     class Meta:
         model = ContractDocument
-        fields = ['number', 'file', 'valid_until']
+        fields = ['number', 'file']
 
 # 🎓 Университет
 class UniversityForm(forms.ModelForm):
@@ -135,23 +135,33 @@ class FacultyForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Добавляем классы и ID для селекторов
-        self.fields['building'].widget.attrs.update({
-            'class': 'form-control',
-            'id': 'id_building',
-            'onchange': 'loadFloors()'  # добавляем обработчик события
-        })
-        self.fields['floor'].widget.attrs.update({
-            'class': 'form-control',
-            'id': 'id_floor'
-        })
 
-        # Если это редактирование и есть здание, показываем соответствующие этажи
-        if self.instance.pk and self.instance.building:
+        # Задаем пустой queryset для этажей по умолчанию
+        self.fields['floor'].queryset = Floor.objects.none()
+
+        # Если форма уже отправлена (POST запрос)
+        if 'building' in self.data:
+            try:
+                building_id = int(self.data.get('building'))
+                # Устанавливаем queryset для этажей выбранного корпуса
+                self.fields['floor'].queryset = Floor.objects.filter(building_id=building_id)
+            except (ValueError, TypeError):
+                pass
+        # Если это редактирование существующего объекта
+        elif self.instance.pk and self.instance.building:
+            # Устанавливаем queryset для этажей корпуса объекта
             self.fields['floor'].queryset = Floor.objects.filter(building=self.instance.building)
-        else:
-            # Для нового факультета, изначально не показываем этажи
-            self.fields['floor'].queryset = Floor.objects.none()
+
+    def clean(self):
+        cleaned_data = super().clean()
+        building = cleaned_data.get('building')
+        floor = cleaned_data.get('floor')
+
+        # Проверяем, что выбранный этаж принадлежит выбранному корпусу
+        if building and floor and floor.building != building:
+            self.add_error('floor', 'Выбранный этаж не принадлежит выбранному корпусу')
+
+        return cleaned_data
 
 # 🪜 Этаж
 class FloorForm(forms.ModelForm):

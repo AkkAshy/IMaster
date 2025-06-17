@@ -22,21 +22,27 @@
                     </a>
                 </li>
                 <li class="category-item">
-                    <a href="{% url 'custom_admin:faculty_list' %}">
-                        <span class="icon"><i class="fas fa-graduation-cap"></i></span>
-                        Факультеты ({{ faculty_count }})
-                    </a>
-                </li>
-                <li class="category-item">
                     <a href="{% url 'custom_admin:floor_list' %}">
                         <span class="icon"><i class="fas fa-layer-group"></i></span>
                         Этажи ({{ floor_count }})
                     </a>
                 </li>
                 <li class="category-item">
+                    <a href="{% url 'custom_admin:faculty_list' %}">
+                        <span class="icon"><i class="fas fa-graduation-cap"></i></span>
+                        Факультеты ({{ faculty_count }})
+                    </a>
+                </li>
+                <li class="category-item">
                     <a href="{% url 'custom_admin:room_list' %}">
                         <span class="icon"><i class="fas fa-door-open"></i></span>
                         Кабинеты ({{ room_count }})
+                    </a>
+                </li>
+                <li class="category-item">
+                    <a href="{% url 'custom_admin:contract_document_list' %}">
+                        <span class="icon"><i class="fas fa-file-contract"></i></span>
+                        Договоры ({{ contract_count }})
                     </a>
                 </li>
                 <li class="category-item">
@@ -52,12 +58,6 @@
                     </a>
                 </li>
                 <li class="category-item">
-                    <a href="{% url 'custom_admin:contract_document_list' %}">
-                        <span class="icon"><i class="fas fa-file-contract"></i></span>
-                        Договоры ({{ contract_count }})
-                    </a>
-                </li>
-                <li class="category-item">
                     <a href="{% url 'custom_admin:user_list' %}">
                         <span class="icon"><i class="fas fa-users"></i></span>
                         Пользователи ({{ user_count }})
@@ -69,6 +69,7 @@
                         Перемещения ({{ movement_count }})
                     </a>
                 </li>
+
             </ul>
         </div>
 

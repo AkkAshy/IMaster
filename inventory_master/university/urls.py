@@ -5,7 +5,7 @@ from rest_framework.routers import DefaultRouter
 
 
 router = DefaultRouter()
-router.register(r'rooms', views.RoomViewSet, basename='room')
+router.register(r'room', views.RoomViewSet, basename='room')
 router.register(r'faculties', views.FacultyViewSet, basename='faculty')
 
 
@@ -13,7 +13,7 @@ router.register(r'faculties', views.FacultyViewSet, basename='faculty')
 urlpatterns = [
 
     path('api/', include(router.urls)),
-
+    path('warehouse/<uuid:uid>/', views.WarehouseDetailView.as_view(), name='warehouse-detail'),
     # Университеты
     path('', views.UniversityListCreateView.as_view(), name='university-list-create'),
     path('<int:pk>/', views.UniversityDetailView.as_view(), name='university-detail'),

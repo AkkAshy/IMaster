@@ -1,5 +1,5 @@
 # from rest_framework import generics
-# from .models import University, Building, Faculty, Floor, Room
+# from .models import University, Building, Faculty, Floor, Room, RoomHistory, FacultyHistory
 # from .serializers import (UniversitySerializer, BuildingSerializer,
 #                           FacultySerializer, FloorSerializer, RoomSerializer,
 #                           FacultyMoveSerializer, RoomSplitSerializer, RoomMergeSerializer,
@@ -230,11 +230,11 @@
 #         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 from rest_framework import generics
-from .models import University, Building, Faculty, Floor, Room
+from .models import University, Building, Faculty, Floor, Room, RoomHistory, FacultyHistory
 from .serializers import (UniversitySerializer, BuildingSerializer,
                           FacultySerializer, FloorSerializer, RoomSerializer,
                           FacultyMoveSerializer, RoomSplitSerializer, RoomMergeSerializer,
-                          RoomMoveSerializer, FacultySplitSerializer, FacultyMergeSerializer,
+                          RoomMoveSerializer, FacultySplitSerializer, FacultyMergeSerializer,WarehouseSerializer,
                           RoomLinkSerializer)
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -246,6 +246,8 @@ from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, mixins
 from django.db import transaction
 from rest_framework.decorators import action
+from user.models import UserAction
+from user.serializers import UserActionSerializer
 
 
 # Университеты
@@ -322,6 +324,16 @@ class RoomListCreateView(generics.ListCreateAPIView):
 
     def get_permissions(self):
         return [permission() for permission in self.permission_classes_by_action.get(self.request.method, [])]
+
+    def perform_create(self, serializer):
+        # Используем transaction для атомарности
+        with transaction.atomic():
+            room = serializer.save(author=self.request.user)
+            UserAction.objects.create(
+                user=self.request.user,
+                action_type='CREATE_ROOM',
+                description=f"Создан кабинет: {room.name}"
+            )
 
 class RoomDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Room.objects.all()
@@ -406,6 +418,33 @@ class RoomViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixin, mixins.Creat
             return Response(RoomSerializer(updated_room).data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    def perform_create(self, serializer):
+        with transaction.atomic():
+            room = serializer.save(author=self.request.user)
+            UserAction.objects.create(
+                user=self.request.user,
+                action_type='CREATE_ROOM',
+                description=f"Создан кабинет: {room.name}"
+            )
+
+
+
+    def perform_destroy(self, instance):
+        with transaction.atomic():
+            UserAction.objects.create(
+                user=self.request.user,
+                action_type='DELETE_ROOM',
+                description=f"Удалён кабинет: {instance.name}"
+            )
+            instance.delete()
+
+    @action(detail=False, methods=['get'], url_path='my-actions')
+    def my_actions(self, request):
+        actions = UserAction.objects.filter(user=self.request.user, description__contains="кабинет").order_by('-created_at')
+        serializer = UserActionSerializer(actions, many=True)
+        return Response(serializer.data)
+
+
 
 
 class FacultyViewSet(mixins.RetrieveModelMixin, mixins.ListModelMixin, mixins.CreateModelMixin, mixins.UpdateModelMixin, viewsets.GenericViewSet):
@@ -486,3 +525,16 @@ class RoomLinkView(APIView):
         serializer = RoomLinkSerializer(room, context={'request': request})
         return Response(serializer.data)
 
+class WarehouseDetailView(generics.RetrieveAPIView):
+    serializer_class = WarehouseSerializer
+    permission_classes = [IsAuthenticated]
+    lookup_field = 'uid'
+
+    def get_queryset(self):
+        return Room.all_objects.filter(is_warehouse=True)
+
+    def get_object(self):
+        try:
+            return self.get_queryset().get(uid=self.kwargs['uid'])
+        except Room.DoesNotExist:
+            raise NotFound("Склад не найден")

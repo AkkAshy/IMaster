@@ -59,4 +59,5 @@ urlpatterns = [
     path('equipment-types/<int:pk>/delete/', views.EquipmentTypeDeleteView.as_view(), name='equipment_type_delete'),
 
     path('load-floors/', views.load_floors, name='load_floors'),
+    path('ajax/load-floors/', views.load_floors, name='ajax_load_floors'),
 ]

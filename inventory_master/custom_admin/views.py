@@ -462,14 +462,11 @@ class EquipmentTypeDeleteView(AdminOrManagerMixin, DeleteView):
     success_url = reverse_lazy('custom_admin:equipment_type_list')
 
 
-
 def load_floors(request):
     building_id = request.GET.get('building')
-    floors = []
 
     if building_id:
-        floors = Floor.objects.filter(building_id=building_id).order_by('number')
+        floors = Floor.objects.filter(building_id=building_id).values('id', 'number')
+        return JsonResponse(list(floors), safe=False)
 
-    return JsonResponse({
-        'floors': [{'id': floor.id, 'number': floor.number} for floor in floors]
-    })
+    return JsonResponse([], safe=False)
