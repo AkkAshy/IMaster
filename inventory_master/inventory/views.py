@@ -214,6 +214,7 @@ class INNTemplateViewSet(viewsets.ModelViewSet):
     serializer_class = INNTemplateSerializer
 
 
+
 class ContractDocumentViewSet(viewsets.ModelViewSet):
     serializer_class = ContractDocumentSerializer
     pagination_class = ContractPagination
@@ -270,7 +271,13 @@ class EquipmentViewSet(viewsets.ModelViewSet):
 
 
     def get_queryset(self):
-        return Equipment.objects.filter(author=self.request.user)
+        user = self.request.user
+
+        if user.role == 'admin':
+            return Equipment.objects.all()
+        else:
+            return Equipment.objects.filter(author=user)
+
 
 
     # Поиск по началу ИНН
@@ -295,8 +302,7 @@ class EquipmentViewSet(viewsets.ModelViewSet):
 
         # Поиск всех ИНН, которые начинаются с введенных цифр
         equipments = Equipment.objects.filter(
-            inn__startswith=inn_str,  # Поиск по началу
-            author=request.user
+            inn__startswith=inn_str  # Поиск по началу
         )
 
         if not equipments.exists():
@@ -315,7 +321,7 @@ class EquipmentViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='search-by-inn-prefix')
     def search_by_inn_prefix(self, request):
         """
-        Поиск оборудования по началу ИНН через query параметры
+        Поиск оборудования по началу ИНН или по точному ИНН (включая формат вида 28847482/03)
         """
         inn_prefix = request.query_params.get('inn_prefix')
         exact_inn = request.query_params.get('exact_inn')
@@ -326,27 +332,16 @@ class EquipmentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        equipments = Equipment.objects.filter(author=request.user)
+        equipments = Equipment.objects.all()
 
         if inn_prefix:
-            try:
-                inn_prefix_str = str(int(inn_prefix))
-                equipments = equipments.filter(inn__startswith=inn_prefix_str)
-            except ValueError:
-                return Response(
-                    {"error": "inn_prefix должен содержать только цифры"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+            # Можно добавить фильтрацию от мусора: только цифры
+            cleaned_prefix = ''.join(filter(str.isdigit, inn_prefix))
+            equipments = equipments.filter(inn__startswith=cleaned_prefix)
 
         if exact_inn:
-            try:
-                exact_inn_int = int(exact_inn)
-                equipments = equipments.filter(inn__exact=exact_inn_int)
-            except ValueError:
-                return Response(
-                    {"error": "exact_inn должен быть числом"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+            # Не преобразуем в int — сравниваем строкой
+            equipments = equipments.filter(inn=exact_inn)
 
         if equipments.exists():
             serializer = EquipmentSerializer(equipments, many=True, context={'request': request})

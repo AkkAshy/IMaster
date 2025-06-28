@@ -680,7 +680,7 @@ class EquipmentSerializer(serializers.ModelSerializer):
             'whiteboard_char', 'whiteboard_specification_id', 'whiteboard_specification_data',
             'status', 'qr_code_url', 'uid', 'author', 'author_id', 'inn', 'location',
             'repair_record', 'disposal_record', 'monitor_char', 'monitor_specification_data',
-            'monitor_specification_id'
+            'monitor_specification_id', 'send_to_warehouse'
         ]
         read_only_fields = ['created_at', 'uid', 'author']
 
@@ -689,6 +689,8 @@ class EquipmentSerializer(serializers.ModelSerializer):
             return obj.qr_code.url
         return None
 
+    send_to_warehouse = serializers.BooleanField(write_only=True, required=False, default=False)
+
     def validate(self, data):
         equipment_type = data.get('type')
         if not equipment_type:
@@ -696,6 +698,21 @@ class EquipmentSerializer(serializers.ModelSerializer):
 
         instance = getattr(self, 'instance', None)
         new_status = data.get('status', instance.status if instance else None)
+
+        send_to_warehouse = data.get('send_to_warehouse', False)
+        room = data.get('room')
+
+
+        if send_to_warehouse and room:
+            raise serializers.ValidationError(
+                "Нельзя указывать и room, и send_to_warehouse одновременно"
+            )
+
+        # Если не на склад, то room обязательно (как было)
+        if not send_to_warehouse and not room:
+            raise serializers.ValidationError(
+                "Необходимо указать кабинет или отметить отправку на склад"
+            )
 
         # ИСПРАВЛЕННАЯ логика ремонта и утилизации
         if instance and new_status == 'NEEDS_REPAIR':
@@ -887,6 +904,21 @@ class EquipmentSerializer(serializers.ModelSerializer):
         return data
 
     def create(self, validated_data):
+
+        send_to_warehouse = validated_data.pop('send_to_warehouse', False)
+
+        if send_to_warehouse:
+            from university.models import Room
+            try:
+                warehouse = Room.all_objects.get(is_warehouse=True)
+                validated_data['room'] = warehouse
+            except Room.DoesNotExist:
+                raise serializers.ValidationError(
+                    "Склад не найден. Создайте склад перед добавлением оборудования."
+                )
+
+
+
         computer_details_data = validated_data.pop('computer_details', None)
         computer_specification = validated_data.pop('computer_specification_id', None)
         printer_char_data = validated_data.pop('printer_char', None)
@@ -912,6 +944,17 @@ class EquipmentSerializer(serializers.ModelSerializer):
 
         equipment = Equipment.objects.create(**validated_data)
         type_name = equipment.type.name.lower()
+
+        if send_to_warehouse:
+            from university.models import Room
+            try:
+                warehouse = Room.all_objects.get(is_warehouse=True)
+                validated_data['room'] = warehouse
+            except Room.DoesNotExist:
+                raise serializers.ValidationError(
+                    "Склад не найден. Создайте склад перед добавлением оборудования."
+                )
+
 
         if type_name in self.COMPUTER_TYPES:
             if computer_specification:
@@ -1572,6 +1615,11 @@ class MoveEquipmentSerializer(serializers.Serializer):
 
 
 class BulkEquipmentSerializer(serializers.Serializer):
+
+
+    send_to_warehouse = serializers.BooleanField(required=False, default=False)
+
+
     type_id = serializers.PrimaryKeyRelatedField(
         queryset=EquipmentType.objects.all(),
         required=True
@@ -1677,6 +1725,21 @@ class BulkEquipmentSerializer(serializers.Serializer):
         if not equipment_type:
             raise serializers.ValidationError({"type_id": "Тип оборудования обязателен."})
 
+
+        send_to_warehouse = data.get('send_to_warehouse', False)
+        room_id = data.get('room_id')
+
+        if send_to_warehouse and room_id:
+            raise serializers.ValidationError(
+                "Нельзя указывать и room_id, и send_to_warehouse одновременно"
+            )
+
+        if not send_to_warehouse and not room_id:
+            raise serializers.ValidationError(
+                "Необходимо указать кабинет или отметить отправку на склад"
+            )
+
+
         title = data.get('title')
         if title:
             # Получаем id текущего объекта, если это обновление
@@ -1771,7 +1834,17 @@ class BulkEquipmentSerializer(serializers.Serializer):
         name_prefix = validated_data.pop('name_prefix')
         author = validated_data.pop('author_id', None)
         request = self.context.get('request')
+        send_to_warehouse = validated_data.pop('send_to_warehouse', False)
 
+        if send_to_warehouse:
+            from university.models import Room
+            try:
+                warehouse = Room.all_objects.get(is_warehouse=True)
+                validated_data['room_id'] = warehouse  # Для bulk используется room_id
+            except Room.DoesNotExist:
+                raise serializers.ValidationError(
+                    "Склад не найден. Создайте склад перед добавлением оборудования."
+                )
 
         # Устанавливаем автора
         if not author and request and request.user.is_authenticated:

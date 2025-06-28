@@ -454,8 +454,9 @@ class RoomSerializer(serializers.ModelSerializer):
             'derived_from',
             'derived_from_display',
             'author',
+            'uid',
         ]
-        read_only_fields = ['qr_code', 'qr_code_url', 'equipments']
+        read_only_fields = ['qr_code', 'qr_code_url', 'equipments', 'uid']
 
     def get_qr_code_url(self, obj):
         if obj.qr_code and hasattr(obj.qr_code, 'url'):
